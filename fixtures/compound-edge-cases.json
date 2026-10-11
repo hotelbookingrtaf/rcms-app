@@ -1,0 +1,55 @@
+{
+  "version": "1.3",
+  "currency": "THB",
+  "scenarios": [
+    {
+      "id": "A_MULTIPLE_SITES_DEBT_INTENT",
+      "given": {
+        "tenantId": "TEN-001",
+        "site1Debt": 1000,
+        "site2Debt": 800,
+        "intentSiteId": "SITE-001",
+        "payment": 1000
+      },
+      "expect": { "site1Outstanding": 0, "site2Outstanding": 800, "crossSiteAllocation": false }
+    },
+    {
+      "id": "B_CREDIT_SERVICE_SEPARATION",
+      "given": { "electricityCredit": 500, "waterDebt": 300 },
+      "expect": { "waterOutstanding": 300, "automaticCrossServiceTransfer": false }
+    },
+    {
+      "id": "C_REVERSAL_AFTER_CREDIT_APPLICATION",
+      "given": { "payment": 2500, "debt": 2000, "creditAppliedLater": 500, "periodClosed": true },
+      "expect": {
+        "mutateClosedHistory": false,
+        "newCurrentPeriodReversalChain": true,
+        "restoredOutstanding": 500
+      }
+    },
+    {
+      "id": "D_METER_REPLACEMENT_ZERO_USAGE",
+      "given": { "julyMeter": "M-A", "julyUsage": 0, "augustMeter": "M-B", "augustUsage": 0 },
+      "expect": { "inspectionCaseAutomaticallyCreated": false }
+    },
+    {
+      "id": "E_LATE_SOURCE_CORRECTION",
+      "given": { "invoiceStatus": "PAID", "oldAmount": 1000, "correctedAmount": 900 },
+      "expect": { "originalInvoiceMutated": false, "creditAdjustment": 100 }
+    },
+    {
+      "id": "F_BILLING_RUN_SOURCE_V2",
+      "given": { "billingRunSourceVersion": "V1", "newSourceVersion": "V2" },
+      "expect": { "overwriteV1": false, "controlledCorrectionRequired": true }
+    },
+    {
+      "id": "G_SHORT_PAYMENT_MULTIPLE_TIMES",
+      "given": { "invoice": 1000, "payments": [700, 300] },
+      "expect": {
+        "invoiceStatusAfterFirst": "ISSUED",
+        "invoiceStatusAfterSecond": "PAID",
+        "paymentCount": 2
+      }
+    }
+  ]
+}

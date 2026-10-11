@@ -1,0 +1,387 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ServiceType {
+  ELECTRICITY
+  WATER
+}
+
+enum TenantStatus {
+  REGISTERED
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum SiteStatus {
+  ACTIVE
+  INACTIVE
+  CLOSED
+}
+
+enum ServiceStatus {
+  REGISTERED
+  ACTIVE
+  SUSPENSION_PENDING
+  SUSPENDED
+  RECONNECTION_PENDING
+  TERMINATED
+}
+
+enum MeterStatus {
+  UNASSIGNED
+  REGISTERED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+  REPLACED
+}
+
+enum ReadingStatus {
+  RECEIVED
+  VALIDATING
+  VALID
+  EXCEPTION
+  LOCKED
+  SUPERSEDED
+}
+
+enum ImportBatchStatus {
+  RECEIVED
+  VALIDATING
+  COMMITTED
+  COMMITTED_WITH_ERRORS
+  REJECTED
+  SUPERSEDED
+}
+
+enum ExceptionRisk {
+  GREEN
+  YELLOW
+  RED
+}
+
+enum ExceptionStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  VALIDATED
+  ISSUED
+  SENT
+  PAID
+  OVERDUE
+  VOID
+  CANCELLED
+}
+
+enum PaymentStatus {
+  RECEIVED
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+  REVERSED
+}
+
+enum AllocationStatus {
+  ACTIVE
+  REVERSED
+}
+
+enum WorkOrderType {
+  INSTALL
+  DISCONNECT
+  RECONNECT
+  REMOVE
+  REPLACE
+  INSPECT
+}
+
+enum WorkOrderStatus {
+  CREATED
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Tenant {
+  id           String       @id @default(cuid())
+  customerCode String       @unique @map("customer_code")
+  customerName String       @map("customer_name")
+  phone        String?
+  lineUserId   String?      @map("line_user_id")
+  status       TenantStatus @default(REGISTERED)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  sites        Site[]
+  payments     Payment[]
+
+  @@map("tenant")
+}
+
+model Site {
+  id          String            @id @default(cuid())
+  tenantId    String            @map("tenant_id")
+  currentCode String            @map("current_code")
+  siteName    String            @map("site_name")
+  location    String
+  status      SiteStatus        @default(ACTIVE)
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  codeHistory SiteCodeHistory[]
+  services    ServiceAccount[]
+  invoices    Invoice[]
+  payments    Payment[]
+
+  @@index([tenantId])
+  @@map("site")
+}
+
+model SiteCodeHistory {
+  id          String    @id @default(cuid())
+  siteId      String    @map("site_id")
+  siteCode    String    @map("site_code")
+  effectiveAt DateTime  @map("effective_at")
+  endedAt     DateTime? @map("ended_at")
+  reason      String
+  site        Site      @relation(fields: [siteId], references: [id])
+
+  @@unique([siteCode, effectiveAt])
+  @@index([siteId, effectiveAt])
+  @@map("site_code_history")
+}
+
+model ServiceAccount {
+  id          String        @id @default(cuid())
+  siteId      String        @map("site_id")
+  serviceType ServiceType   @map("service_type")
+  status      ServiceStatus @default(REGISTERED)
+  startDate   DateTime      @map("start_date")
+  endDate     DateTime?     @map("end_date")
+  site        Site          @relation(fields: [siteId], references: [id])
+  meters      Meter[]
+  invoices    Invoice[]
+  payments    Payment[]
+  credits     CreditEvent[]
+  workOrders  WorkOrder[]
+
+  @@index([siteId, serviceType])
+  @@map("service_account")
+}
+
+model Meter {
+  id               String             @id @default(cuid())
+  serviceAccountId String             @map("service_account_id")
+  meterNumber      String             @map("meter_number")
+  status           MeterStatus        @default(REGISTERED)
+  installationDate DateTime           @map("installation_date")
+  removalDate      DateTime?          @map("removal_date")
+  serviceAccount   ServiceAccount     @relation(fields: [serviceAccountId], references: [id])
+  readings         Reading[]
+  oldReplacements  MeterReplacement[] @relation("OldMeter")
+  newReplacements  MeterReplacement[] @relation("NewMeter")
+  inspections      InspectionCase[]
+
+  @@unique([serviceAccountId, meterNumber])
+  @@map("meter")
+}
+
+model ImportBatch {
+  id                String            @id @default(cuid())
+  idempotencyKey    String            @unique @map("idempotency_key")
+  sourceSystem      String            @map("source_system")
+  sourceFileName    String            @map("source_file_name")
+  templateVersion   String            @map("template_version")
+  sourceDataVersion String            @map("source_data_version")
+  status            ImportBatchStatus @default(RECEIVED)
+  rowCount          Int               @default(0) @map("row_count")
+  validCount        Int               @default(0) @map("valid_count")
+  errorCount        Int               @default(0) @map("error_count")
+  warningCount      Int               @default(0) @map("warning_count")
+  supersedesId      String?           @map("supersedes_id")
+  importedAt        DateTime          @default(now()) @map("imported_at")
+  importedBy        String            @map("imported_by")
+  readings          Reading[]
+  exceptions        ExceptionItem[]
+
+  @@map("import_batch")
+}
+
+model Reading {
+  id                String        @id @default(cuid())
+  meterId           String        @map("meter_id")
+  serviceAccountId  String        @map("service_account_id")
+  billingPeriodId   String        @map("billing_period_id")
+  previousReading   Decimal       @map("previous_reading") @db.Decimal(18, 3)
+  currentReading    Decimal       @map("current_reading") @db.Decimal(18, 3)
+  usageUnits        Decimal       @map("usage_units") @db.Decimal(18, 3)
+  amountDue         Decimal       @map("amount_due") @db.Decimal(14, 2)
+  readingDate       DateTime      @map("reading_date")
+  sourceSystem      String        @map("source_system")
+  sourceRecordId    String        @map("source_record_id")
+  sourceDataVersion String        @map("source_data_version")
+  importBatchId     String?       @map("import_batch_id")
+  status            ReadingStatus @default(RECEIVED)
+  meter             Meter         @relation(fields: [meterId], references: [id])
+  importBatch       ImportBatch?  @relation(fields: [importBatchId], references: [id])
+
+  @@unique([meterId, billingPeriodId, sourceDataVersion])
+  @@unique([sourceSystem, sourceRecordId, sourceDataVersion])
+  @@index([serviceAccountId, billingPeriodId])
+  @@map("reading")
+}
+
+model Invoice {
+  id                String              @id @default(cuid())
+  invoiceNumber     String              @unique @map("invoice_number")
+  tenantId          String              @map("tenant_id")
+  siteId            String              @map("site_id")
+  serviceAccountId  String              @map("service_account_id")
+  billingPeriodId   String              @map("billing_period_id")
+  sourceDataVersion String              @map("source_data_version")
+  issueDate         DateTime            @map("issue_date")
+  dueDate           DateTime            @map("due_date")
+  amountDue         Decimal             @map("amount_due") @db.Decimal(14, 2)
+  status            InvoiceStatus       @default(DRAFT)
+  snapshot          Json
+  site              Site                @relation(fields: [siteId], references: [id])
+  serviceAccount    ServiceAccount      @relation(fields: [serviceAccountId], references: [id])
+  allocations       PaymentAllocation[]
+
+  @@index([tenantId, billingPeriodId])
+  @@index([serviceAccountId, status])
+  @@map("invoice")
+}
+
+model Payment {
+  id               String              @id @default(cuid())
+  tenantId         String              @map("tenant_id")
+  siteId           String              @map("site_id")
+  serviceAccountId String              @map("service_account_id")
+  amount           Decimal             @db.Decimal(14, 2)
+  paymentDate      DateTime            @map("payment_date")
+  postingDate      DateTime            @map("posting_date")
+  financialPeriod  String              @map("financial_period")
+  reference        String
+  idempotencyKey   String              @unique @map("idempotency_key")
+  status           PaymentStatus       @default(RECEIVED)
+  verifiedBy       String?             @map("verified_by")
+  verifiedAt       DateTime?           @map("verified_at")
+  tenant           Tenant              @relation(fields: [tenantId], references: [id])
+  site             Site                @relation(fields: [siteId], references: [id])
+  serviceAccount   ServiceAccount      @relation(fields: [serviceAccountId], references: [id])
+  allocations      PaymentAllocation[]
+  credits          CreditEvent[]
+
+  @@unique([reference, amount, paymentDate])
+  @@map("payment")
+}
+
+model PaymentAllocation {
+  id        String           @id @default(cuid())
+  paymentId String           @map("payment_id")
+  invoiceId String           @map("invoice_id")
+  amount    Decimal          @db.Decimal(14, 2)
+  status    AllocationStatus @default(ACTIVE)
+  createdAt DateTime         @default(now()) @map("created_at")
+  payment   Payment          @relation(fields: [paymentId], references: [id])
+  invoice   Invoice          @relation(fields: [invoiceId], references: [id])
+
+  @@unique([paymentId, invoiceId])
+  @@map("payment_allocation")
+}
+
+model CreditEvent {
+  id               String         @id @default(cuid())
+  serviceAccountId String         @map("service_account_id")
+  paymentId        String?        @map("payment_id")
+  eventType        String         @map("event_type")
+  amount           Decimal        @db.Decimal(14, 2)
+  effectiveAt      DateTime       @map("effective_at")
+  recordedAt       DateTime       @default(now()) @map("recorded_at")
+  reversalOfId     String?        @map("reversal_of_id")
+  serviceAccount   ServiceAccount @relation(fields: [serviceAccountId], references: [id])
+  payment          Payment?       @relation(fields: [paymentId], references: [id])
+
+  @@index([serviceAccountId, effectiveAt])
+  @@map("credit_event")
+}
+
+model ExceptionItem {
+  id            String          @id @default(cuid())
+  importBatchId String?         @map("import_batch_id")
+  entityType    String          @map("entity_type")
+  entityId      String?         @map("entity_id")
+  code          String
+  risk          ExceptionRisk
+  status        ExceptionStatus @default(OPEN)
+  message       String
+  provenance    Json?
+  importBatch   ImportBatch?    @relation(fields: [importBatchId], references: [id])
+
+  @@index([status, risk])
+  @@map("exception_item")
+}
+
+model MeterReplacement {
+  id                String    @id @default(cuid())
+  siteId            String    @map("site_id")
+  serviceAccountId  String    @map("service_account_id")
+  oldMeterId        String    @map("old_meter_id")
+  newMeterId        String    @map("new_meter_id")
+  replacementDate   DateTime  @map("replacement_date")
+  reason            String
+  oldFinalReading   Decimal   @map("old_final_reading") @db.Decimal(18, 3)
+  newInitialReading Decimal   @map("new_initial_reading") @db.Decimal(18, 3)
+  source            String
+  status            String
+  verifiedBy        String?   @map("verified_by")
+  verifiedAt        DateTime? @map("verified_at")
+  note              String?
+  oldMeter          Meter     @relation("OldMeter", fields: [oldMeterId], references: [id])
+  newMeter          Meter     @relation("NewMeter", fields: [newMeterId], references: [id])
+
+  @@map("meter_replacement")
+}
+
+model InspectionCase {
+  id               String  @id @default(cuid())
+  siteId           String  @map("site_id")
+  serviceAccountId String  @map("service_account_id")
+  meterId          String  @map("meter_id")
+  triggerPeriod1   String  @map("trigger_period_1")
+  triggerPeriod2   String  @map("trigger_period_2")
+  assignedTo       String? @map("assigned_to")
+  status           String
+  result           String?
+  note             String?
+  meter            Meter   @relation(fields: [meterId], references: [id])
+
+  @@index([serviceAccountId, meterId, status])
+  @@map("inspection_case")
+}
+
+model WorkOrder {
+  id               String          @id @default(cuid())
+  serviceAccountId String          @map("service_account_id")
+  type             WorkOrderType
+  status           WorkOrderStatus @default(CREATED)
+  assignedTo       String?         @map("assigned_to")
+  effectiveAt      DateTime?       @map("effective_at")
+  recordedAt       DateTime        @default(now()) @map("recorded_at")
+  evidenceRefs     String[]        @map("evidence_refs")
+  serviceAccount   ServiceAccount  @relation(fields: [serviceAccountId], references: [id])
+
+  @@index([serviceAccountId, status])
+  @@map("work_order")
+}
